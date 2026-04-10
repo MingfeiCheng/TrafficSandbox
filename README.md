@@ -28,12 +28,12 @@ docker run --name sandbox --rm -d -p 10667:10667 -p 18888:18888 \
 |------|---------|-------------|
 | `--fps` | `100` | Target simulation frames per second |
 | `--rpc-port` | `10667` | RPC server port |
-| `--vis-port` | `8888` | Visualization frontend port |
+| `--vis-port` | `18888` | Visualization frontend port |
 
 To use custom ports:
 
 ```bash
-python app.py --fps 100 --rpc-port 10668 --vis-port 19888
+python app.py --fps 100 --rpc-port 10668 --vis-port 18888
 ```
 
 ### 2. Open Visualization
