@@ -1,6 +1,6 @@
 # TrafficSandbox
 
-A lightweight, Docker-based traffic simulation sandbox for autonomous driving testing. It provides a physics-based simulation environment with HD map support, real-time visualization, and a MessagePack-RPC API for programmatic control.
+A lightweight, Docker-based traffic simulation sandbox for testing [Baidu Apollo](https://github.com/ApolloAuto/apollo) autonomous driving systems. It provides a physics-based simulation environment with Apollo HD map support, real-time visualization, and a MessagePack-RPC API for programmatic control.
 
 ## Features
 
