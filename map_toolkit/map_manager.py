@@ -93,6 +93,18 @@ class MapManager:
                 "stop_line": self.stop_sign.get_line(ss_id),
             })
 
+        render_data["traffic_lights"] = []
+        if self.traffic_light.traffic_light:
+            for tl_id in self.traffic_light.traffic_light:
+                try:
+                    stop_line = self.traffic_light.get_stop_line(tl_id)
+                    render_data["traffic_lights"].append({
+                        "id": tl_id,
+                        "stop_line": stop_line if stop_line else [],
+                    })
+                except Exception:
+                    pass
+
         return render_data
 
     # ------------------------------------------------------------------

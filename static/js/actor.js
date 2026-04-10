@@ -1,118 +1,119 @@
 import { getTransform } from "./view_state.js";
+import { applyMapTransform } from "./map.js";
 
 const actorCanvas = document.getElementById("actorCanvas");
 const actorCtx = actorCanvas.getContext("2d");
 
-// Get the container's width and height
-const container = document.querySelector('.simulator-container');
-const containerWidth = container.clientWidth;
-const containerHeight = container.clientHeight;
-
-// Set the canvas dimensions to match the container
-actorCanvas.width = containerWidth;
-actorCanvas.height = containerHeight;
-
 let actors = null;
 
-const ACTOR_TYPE = {
-    "vehicle": { color: "rgb(79,108,243)" },
-    "walker": { color: "rgb(245,177,8)" },
-    "static": { color: "rgb(184,29,227)" },
-    "bicycle": { color: "rgb(0,175,149)" },
+const ACTOR_COLORS = {
+  "vehicle": "rgba(79,108,243,0.85)",
+  "walker":  "rgba(245,177,8,0.85)",
+  "static":  "rgba(184,29,227,0.8)",
+  "bicycle": "rgba(0,175,149,0.85)",
 };
+const ADS_COLOR = "rgba(245,82,82,0.9)";
+const DEFAULT_COLOR = "rgba(150,150,150,0.7)";
 
-const ROLE_TYPE = {
-    "ads": { color: "rgb(245,82,82)" }
-};
-
+export function setActorData(newActors) {
+  actors = newActors;
+}
 
 export function updateActors(newActors) {
-    actors = newActors;
-    drawActor();
+  actors = newActors;
+  drawActor();
 }
 
 export function drawActor() {
-    if (!window.actors || actors.length === 0) return;
-    
-    const { offsetX, offsetY, scale, rotationAngle } = getTransform();
+  const dpr = window.devicePixelRatio || 1;
+  const w = actorCanvas.clientWidth;
+  const h = actorCanvas.clientHeight;
+  if (actorCanvas.width !== w * dpr || actorCanvas.height !== h * dpr) {
+    actorCanvas.width = w * dpr;
+    actorCanvas.height = h * dpr;
+  }
 
-    actorCtx.clearRect(0, 0, actorCanvas.width, actorCanvas.height);
+  actorCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  actorCtx.clearRect(0, 0, actorCanvas.width, actorCanvas.height);
+
+  if (!actors || actors.length === 0) return;
+
+  const { scale } = getTransform();
+
+  actorCtx.save();
+  applyMapTransform(actorCtx, w, h);
+
+  for (let i = 0; i < actors.length; i++) {
+    const actor = actors[i];
+    const polygon = actor.polygon;
+    if (!polygon || polygon.length < 3) continue;
+
+    // Color
+    const color = actor.role === "ads"
+      ? ADS_COLOR
+      : (ACTOR_COLORS[(actor.category || "").split(".")[0]] || DEFAULT_COLOR);
+
+    // Fill polygon
+    actorCtx.beginPath();
+    actorCtx.moveTo(polygon[0][0], polygon[0][1]);
+    for (let j = 1; j < polygon.length; j++) actorCtx.lineTo(polygon[j][0], polygon[j][1]);
+    actorCtx.closePath();
+    actorCtx.fillStyle = color;
+    actorCtx.fill();
+
+    // Heading indicator
+    if (actor.location) {
+      const cx = polygon.reduce((s, p) => s + p[0], 0) / polygon.length;
+      const cy = polygon.reduce((s, p) => s + p[1], 0) / polygon.length;
+      const yaw = actor.location.yaw || 0;
+      const len = actor.bbox ? actor.bbox.length / 2 : 2;
+
+      actorCtx.beginPath();
+      actorCtx.moveTo(cx, cy);
+      actorCtx.lineTo(cx + Math.cos(yaw) * len, cy + Math.sin(yaw) * len);
+      actorCtx.strokeStyle = "rgba(255,255,255,0.8)";
+      actorCtx.lineWidth = 0.25;
+      actorCtx.stroke();
+    }
+
+    // Label
+    const cx = polygon.reduce((s, p) => s + p[0], 0) / polygon.length;
+    const cy = polygon.reduce((s, p) => s + p[1], 0) / polygon.length;
+    const labelScale = 1 / scale;
+    const id = actor.id || "";
+    const speed = parseFloat(actor.speed || 0).toFixed(1);
+    const label = `${id}  ${speed} m/s`;
+
     actorCtx.save();
+    actorCtx.translate(cx, cy);
+    actorCtx.scale(labelScale, labelScale);
 
-    actorCtx.translate(offsetX, offsetY);
-    actorCtx.scale(scale, scale);
-    actorCtx.rotate(rotationAngle);
+    actorCtx.font = "11px -apple-system, sans-serif";
+    const tw = actorCtx.measureText(label).width;
 
-    const fillGroups = new Map(); // color → list of polygons
-    const textData = [];          
+    actorCtx.fillStyle = "rgba(0,0,0,0.6)";
+    actorCtx.beginPath();
+    roundRect(actorCtx, -tw / 2 - 3, -18, tw + 6, 16, 3);
+    actorCtx.fill();
 
-    for (let i = 0; i < actors.length; i++) {
-        const actor = actors[i];
-        const polygon = actor.polygon;
-        if (!polygon || polygon.length < 3) continue; 
-
-        const actorStyle = actor.role === "ads"
-            ? ROLE_TYPE[actor.role]
-            : ACTOR_TYPE[actor.category.split(".")[0]] || { color: "gray" };
-
-        const normalized = [];
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (let j = 0; j < polygon.length; j++) {
-            const [x, y] = polygon[j];
-            const nx = x - min_x;
-            const ny = y - min_y;
-            normalized.push([nx, ny]);
-            if (nx < minX) minX = nx;
-            if (ny < minY) minY = ny;
-            if (nx > maxX) maxX = nx;
-            if (ny > maxY) maxY = ny;
-        }
-
-        if (!fillGroups.has(actorStyle.color)) {
-            fillGroups.set(actorStyle.color, []);
-        }
-        fillGroups.get(actorStyle.color).push(normalized);
-
-        const cx = (minX + maxX) / 2;
-        const cy = (minY + maxY) / 2;
-        textData.push({
-            id: actor.id,
-            speed: parseFloat(actor.speed).toFixed(2),
-            cx,
-            cy
-        });
-    }
-
-    actorCtx.lineWidth = 0.03;
-    actorCtx.strokeStyle = "black";
-    actorCtx.setLineDash([]);
-
-    for (const [color, polys] of fillGroups.entries()) {
-        actorCtx.fillStyle = color;
-        for (let i = 0; i < polys.length; i++) {
-            const poly = polys[i];
-            actorCtx.beginPath();
-            actorCtx.moveTo(poly[0][0], poly[0][1]);
-            for (let j = 1; j < poly.length; j++) {
-                actorCtx.lineTo(poly[j][0], poly[j][1]);
-            }
-            actorCtx.closePath();
-            actorCtx.fill();
-            actorCtx.stroke();
-        }
-    }
-
-    actorCtx.font = `0.6px Arial`;
+    actorCtx.fillStyle = "#e8e9f3";
     actorCtx.textAlign = "center";
     actorCtx.textBaseline = "middle";
-    actorCtx.fillStyle = "black";
-
-    for (let i = 0; i < textData.length; i++) {
-        const { id, speed, cx, cy } = textData[i];
-        actorCtx.fillText(`${id}`, cx, cy - 0.3);
-        actorCtx.fillText(`${speed} m/s`, cx, cy + 0.3);
-    }
-
+    actorCtx.fillText(label, 0, -10);
     actorCtx.restore();
+  }
+
+  actorCtx.restore();
 }
 
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+}

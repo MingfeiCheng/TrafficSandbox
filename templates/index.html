@@ -2,52 +2,141 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Map and Vehicles</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TrafficSandbox</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <!-- Embedding Flask variables as global JavaScript variables -->
-    <!-- External Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.5.1/jquery.min.js" integrity="sha512-bLT0Qm9VnAYZDflyKcBaQ2gg0hSYNQrJ8RilYldYQ1FxQYoCLtUjuuRuZo+fjqhx/qtq/1itJ0C2ejDxltZVFg==" crossorigin="anonymous"></script>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" integrity="sha384-2huaZvOR9iDzHqslqwpR87isEmrfxqyWOF7hr7BY6KG0+hVKLoEXMPUJw3ynWuhO" crossorigin="anonymous"></script>
 </head>
 <body>
-<!--    &lt;!&ndash; Canvas Layers &ndash;&gt;-->
-<!--    <canvas id="mapCanvas"></canvas>-->
-<!--    <canvas id="trafficLightCanvas"></canvas>-->
-<!--    <canvas id="actorCanvas"></canvas>-->
+    <!-- Loading Overlay -->
     <div id="loading-bar" class="loading-overlay" style="display: none;">
-    <div class="loading-box">
-        <div class="loading-text">Loading map...</div>
-        <div class="loading-progress">
-        <div class="loading-progress-bar"></div>
-        </div>
-    </div>
-    </div>
-
-
-    <div class="main-container">
-        <div class="info-container">
-            <div class="info">
-                <span id="map-name">Map: - </span> |
-                <span id="frame">Frame: - </span> |
-                <span id="game-time">Game Time: - </span> |
-                <span id="real-time">Real Time: - </span>
+        <div class="loading-box">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Loading map...</div>
+            <div class="loading-progress">
+                <div class="loading-progress-bar"></div>
             </div>
-            
-            <button id="resetViewButton">Reset View</button>
-        </div>
-        <div class="simulator-container">
-            <!-- Canvas Layers -->
-            <canvas id="mapCanvas" style="width:100%; height:100%;"></canvas>
-            <canvas id="trafficLightCanvas"></canvas>
-            <canvas id="actorCanvas"></canvas>
         </div>
     </div>
 
-    <!-- Custom JavaScript files -->
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <h1 class="logo">TrafficSandbox</h1>
+            </div>
+            <div class="header-center">
+                <div class="stat-group">
+                    <div class="stat">
+                        <span class="stat-label">Map</span>
+                        <span class="stat-value" id="map-name">--</span>
+                    </div>
+                    <div class="stat-divider"></div>
+                    <div class="stat">
+                        <span class="stat-label">Frame</span>
+                        <span class="stat-value" id="frame">--</span>
+                    </div>
+                    <div class="stat-divider"></div>
+                    <div class="stat">
+                        <span class="stat-label">Game Time</span>
+                        <span class="stat-value" id="game-time">--</span>
+                    </div>
+                    <div class="stat-divider"></div>
+                    <div class="stat">
+                        <span class="stat-label">Server Time</span>
+                        <span class="stat-value" id="real-time">--</span>
+                    </div>
+                </div>
+            </div>
+            <div class="header-right">
+                <button id="resetViewButton" class="btn btn-reset" title="Reset camera view">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="1 4 1 10 7 10"></polyline>
+                        <polyline points="23 20 23 14 17 14"></polyline>
+                        <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"></path>
+                    </svg>
+                    Reset View
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Viewport -->
+        <main class="viewport">
+            <div class="canvas-container" id="canvasContainer">
+                <canvas id="mapCanvas"></canvas>
+                <canvas id="trafficLightCanvas"></canvas>
+                <canvas id="actorCanvas"></canvas>
+            </div>
+
+            <!-- Legend Panel -->
+            <div class="legend-panel">
+                <div class="legend-title">Legend</div>
+                <div class="legend-item">
+                    <span class="legend-color" style="background: #4f6cf3;"></span>
+                    <span>Vehicle</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-color" style="background: #f55252;"></span>
+                    <span>ADS Vehicle</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-color" style="background: #f5b108;"></span>
+                    <span>Pedestrian</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-color" style="background: #00af95;"></span>
+                    <span>Bicycle</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-color" style="background: #b81de3;"></span>
+                    <span>Static</span>
+                </div>
+                <div class="legend-divider"></div>
+                <div class="legend-item">
+                    <span class="legend-color" style="background: #00af09;"></span>
+                    <span>Green Light</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-color" style="background: #c20000;"></span>
+                    <span>Red Light</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-color" style="background: #ffc30a;"></span>
+                    <span>Yellow Light</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-color" style="background: #555566;"></span>
+                    <span>Inactive Light</span>
+                </div>
+            </div>
+
+            <!-- Controls Hint -->
+            <div class="controls-hint">
+                <span>LMB: Pan</span>
+                <span>Scroll: Zoom</span>
+                <span>RMB: Rotate</span>
+            </div>
+        </main>
+
+        <!-- Status Bar -->
+        <footer class="status-bar">
+            <div class="status-left">
+                <span class="status-indicator" id="connectionStatus"></span>
+                <span id="connectionText">Connecting...</span>
+            </div>
+            <div class="status-right">
+                <span id="actorCount">Actors: 0</span>
+                <span class="status-sep">|</span>
+                <span id="signalCount">Signals: 0</span>
+            </div>
+        </footer>
+    </div>
+
     <script type="module" src="{{ url_for('static', filename='js/map.js') }}"></script>
     <script type="module" src="{{ url_for('static', filename='js/actor.js') }}"></script>
     <script type="module" src="{{ url_for('static', filename='js/traffic_light.js') }}"></script>
-    <script type="module" src="{{ url_for('static', filename='js/listener.js') }}"></script> <!-- Adds shared canvas listeners -->
-    <script type="module" src="{{ url_for('static', filename='js/socket.js') }}"></script>          <!-- Handles socket connections -->
+    <script type="module" src="{{ url_for('static', filename='js/listener.js') }}"></script>
+    <script type="module" src="{{ url_for('static', filename='js/socket.js') }}"></script>
 </body>
 </html>

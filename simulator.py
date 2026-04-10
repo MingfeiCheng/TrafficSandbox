@@ -10,7 +10,8 @@ from common.timer import Timer
 from common.data_structure import Location
 from common.rpc_utils import sandbox_api
 
-from actor.control import VehicleControl, WalkerControl
+from actor.control import VehicleControl, VehiclePerfectControl, WalkerControl
+from actor.vehicle.base import PerfectVehicleActor
 
 class Simulator:
     """Main simulation loop for controlling all actors and signals."""
@@ -357,12 +358,22 @@ class Simulator:
 
             actor_instance = self.actors[actor_id]
             try:
-                control_command = VehicleControl(
-                    throttle=float(control['throttle']),
-                    steer=float(control['steer']),
-                    brake=float(control['brake']),
-                    reverse=control['reverse'] if 'reverse' in control.keys() else False,
-                )
+                if isinstance(actor_instance, PerfectVehicleActor):
+                    control_command = VehiclePerfectControl(
+                        acceleration=float(control.get('acceleration', 0.0)),
+                        heading=float(control.get('heading', 0.0)),
+                        throttle=float(control.get('throttle', 0.0)),
+                        brake=float(control.get('brake', 0.0)),
+                        steer=float(control.get('steer', 0.0)),
+                        reverse=control.get('reverse', False),
+                    )
+                else:
+                    control_command = VehicleControl(
+                        throttle=float(control['throttle']),
+                        steer=float(control['steer']),
+                        brake=float(control['brake']),
+                        reverse=control.get('reverse', False),
+                    )
                 actor_instance.apply_control(control_command)
             except Exception as e:
                 return False, f"Invalid control command: {str(e)}"

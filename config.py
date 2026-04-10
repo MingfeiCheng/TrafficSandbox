@@ -7,4 +7,4 @@ class Config:
 
     # Network ports
     RPC_PORT: int = 10667
-    VIS_PORT: int = 8888
+    VIS_PORT: int = 18888

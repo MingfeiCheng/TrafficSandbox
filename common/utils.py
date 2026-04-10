@@ -12,7 +12,7 @@ def discover_modules(root_dir, exclude_dirs=None):
         exclude_dirs (list, optional): List of directory names to exclude (e.g., ['tests', '__pycache__']).
     """
     if exclude_dirs is None:
-        exclude_dirs = ["tests", "__pycache__"]
+        exclude_dirs = ["tests", "__pycache__", ".venv", "venv", ".git", "node_modules", "docs"]
 
     for root, dirs, files in os.walk(root_dir):
         # Skip excluded directories

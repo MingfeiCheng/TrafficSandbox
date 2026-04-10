@@ -1,266 +1,147 @@
 # TrafficSandbox
 
-A lightweight traffic simulation sandbox that runs inside a Docker container and exposes its functionality via MessagePack-RPC over ZMQ.
+A lightweight, Docker-based traffic simulation sandbox for autonomous driving testing. It provides a physics-based simulation environment with HD map support, real-time visualization, and a MessagePack-RPC API for programmatic control.
 
-## Architecture
+## Features
 
-```
-+---------------------------------------------------+
-|  Docker Container (drivora/sandbox:latest)         |
-|                                                    |
-|  TrafficSandbox (app.py)                           |
-|  ├── Simulator        (actor tick loop)            |
-|  ├── MapManager       (HD map queries)             |
-|  ├── RPC Server       (ZMQ, port 10667)            |
-|  └── Vis Server       (Flask+SocketIO, port 8888)  |
-+---------------------------------------------------+
-         ▲
-         │  TCP / ZMQ (msgpack-rpc)
-         ▼
-+---------------------------------------------------+
-|  Host / Client                                     |
-|  SandboxOperator  (scenario_runner/sandbox_operator)|
-|  ├── operator.sim.*       → Simulator RPC          |
-|  ├── operator.map.*       → MapManager RPC         |
-|  └── operator.load_map()  → Root RPC               |
-+---------------------------------------------------+
-```
+- **Physics-based simulation** -- Bicycle/Ackermann kinematic model for vehicles, simplified dynamics for walkers
+- **HD map support** -- Apollo HD map format with lane topology, traffic lights, stop signs, crosswalks, and junctions
+- **Real-time visualization** -- Browser-based multi-layer canvas rendering with pan/zoom/rotate
+- **RPC API** -- MessagePack-RPC over ZMQ for high-performance client-server communication
+- **Extensible actor system** -- Registry-based architecture for adding custom actor types
+- **Docker deployment** -- Single-container setup with configurable FPS
 
 ## Quick Start
 
-### 1. Build the Docker image
+### 1. Build & Run
 
 ```bash
-cd Apollo/TrafficSandbox
-docker build -t drivora/sandbox:latest .
+cd TrafficSandbox
+docker build -t trafficsandbox:latest .
+docker run --name sandbox --rm -d -p 10667:10667 -p 18888:18888 \
+    trafficsandbox:latest bash -c "python /app/app.py --fps 100"
 ```
 
-### 2. Start the container
+### CLI Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--fps` | `100` | Target simulation frames per second |
+| `--rpc-port` | `10667` | RPC server port |
+| `--vis-port` | `8888` | Visualization frontend port |
+
+To use custom ports:
 
 ```bash
-docker run --name sandbox_dev --rm -d \
-    drivora/sandbox:latest \
-    bash -c "python /app/app.py --fps 100"
+python app.py --fps 100 --rpc-port 10668 --vis-port 19888
 ```
 
-### 3. Connect from Python (client side)
+### 2. Open Visualization
+
+Navigate to `http://localhost:18888` in your browser.
+
+### 3. Connect from Python
 
 ```python
-from scenario_runner.sandbox_operator import SandboxOperator
+from tinyrpc import RPCClient
+from tinyrpc.protocols.msgpackrpc import MSGPACKRPCProtocol
+from tinyrpc.transports.zmq import ZmqClientTransport
+import zmq
 
-operator = SandboxOperator(container_name="sandbox_dev")
+ctx = zmq.Context()
+transport = ZmqClientTransport.create(ctx, "tcp://127.0.0.1:10667")
+client = RPCClient(MSGPACKRPCProtocol(), transport)
+proxy = client.get_proxy()
 
 # Load a map
-operator.load_map("san_mateo")
+proxy.load_map("san_mateo")
 
-# Create an actor
-operator.sim.create_actor({
-    "actor_id": "ego_1",
+# Create a vehicle
+proxy.call("sim.create_actor", [{
+    "actor_id": "npc_1",
     "actor_type": "vehicle.lincoln.mkz",
-    "x": 559700.0, "y": 4157850.0, "z": 0.0,
+    "x": 587078.0, "y": 4141416.0, "z": 0.0,
     "heading": 1.57
-})
+}])
 
 # Start simulation
-operator.sim.start_scenario()
+proxy.call("sim.start_scenario", [])
 
-# Get world snapshot
-snapshot = operator.sim.get_snapshot()
-
-# Query map
-waypoint = operator.map.get_waypoint("lane_1", s=10.0, l=0.0)
-
-# Cleanup
-operator.close()
-```
-
-## RPC API Reference
-
-All RPC calls return `{"status": "ok", "data": <result>}` on success or `{"status": "error", "message": "...", "traceback": "..."}` on failure.
-
-### Root APIs
-
-| Method | Args | Description |
-|--------|------|-------------|
-| `load_map(map_name)` | `str` | Load HD map data and notify frontend |
-| `set_timeout(timeout)` | `float` | Set map loading timeout (seconds) |
-| `shutdown()` | - | Gracefully stop all components |
-
-### Simulator APIs (`sim.*`)
-
-| Method | Args | Description |
-|--------|------|-------------|
-| `sim.reset()` | - | Clear all actors/signals, reset timer |
-| `sim.start_scenario()` | - | Start the simulation tick loop |
-| `sim.stop_scenario()` | - | Pause the simulation |
-| `sim.get_time()` | - | Get frame count, game time, real FPS |
-| `sim.get_snapshot()` | - | Get full world state (actors + signals) |
-| `sim.get_actor(actor_id)` | `str` | Get single actor state |
-| `sim.get_signal(signal_id)` | `str` | Get single signal state |
-| `sim.get_actor_blueprint(actor_type)` | `str` | Get actor schema |
-| `sim.get_scenario_status()` | - | Returns `"running"` or `"waiting"` |
-| `sim.create_actor(config)` | `dict` | Spawn actor (see config below) |
-| `sim.create_signal(config)` | `dict` | Spawn traffic signal |
-| `sim.remove_actor(actor_id)` | `str` | Despawn actor |
-| `sim.remove_signal(signal_id)` | `str` | Despawn signal |
-| `sim.set_actor_status(actor_id, status)` | `str, str` | Set actor readiness |
-| `sim.set_static_location(actor_id, location)` | `str, dict` | Teleport actor |
-| `sim.set_signal_state(signal_id, state)` | `str, str` | Update signal |
-| `sim.apply_vehicle_control(actor_id, control)` | `str, dict` | Send vehicle control |
-| `sim.apply_walker_action(actor_id, action)` | `str, dict` | Send walker control |
-
-**Actor config:**
-```python
-{
-    "actor_id": "ego_1",
-    "actor_type": "vehicle.lincoln.mkz",  # see Actor Types below
-    "x": 559700.0,
-    "y": 4157850.0,
-    "z": 0.0,
-    "heading": 1.57  # radians
-}
-```
-
-**Vehicle control:**
-```python
-{"throttle": 0.5, "steer": 0.0, "brake": 0.0, "reverse": False}
-```
-
-**Walker control:**
-```python
-{"acceleration": 1.0, "heading": 0.0}
-```
-
-### Map APIs (`map.*`)
-
-| Method | Args | Returns | Description |
-|--------|------|---------|-------------|
-| `map.get_current_map()` | - | `str` | Current map name |
-| `map.get_render_data()` | - | `dict` | Lanes + stop signs for visualization |
-| `map.get_waypoint(lane_id, s, l)` | `str, float, float` | `Waypoint` | Waypoint at (s, l) on lane |
-| `map.get_next_waypoint(lane_id, s, l, distance)` | `str, float, float, float` | `list[Waypoint]` | Next waypoint(s) ahead |
-| `map.get_previous_waypoint(lane_id, s, l, distance)` | `str, float, float, float` | `list[Waypoint]` | Previous waypoint(s) behind |
-| `map.find_lane_id(x, y)` | `float, float` | `{"lane_id": str, "s": float}` | Find lane at world position |
-| `map.get_speed_limit(lane_id)` | `str` | `float` | Lane speed limit (m/s) |
-| `map.get_lane_heading(lane_id, s)` | `str, float` | `float` | Lane heading (radians) at s |
-| `map.get_lane_direction(lane_id)` | `str` | `str` | `FORWARD` / `BACKWARD` / `BIDIRECTION` / `UNKNOWN` |
-| `map.is_driving_lane(lane_id)` | `str` | `bool` | True if `CITY_DRIVING` type |
-
-**Waypoint structure:**
-```python
-{
-    "lane_id": "lane_123",
-    "is_junction": False,
-    "s": 15.0,
-    "l": 0.0,
-    "x": 559710.5,
-    "y": 4157860.3,
-    "heading": 1.57,
-    "speed_limit": 11.11
-}
+# Get world state
+snapshot = proxy.call("sim.get_snapshot", [])
 ```
 
 ## Actor Types
 
-Registered actor types (used in `actor_type` field):
+| Type ID | Category | Description | Dimensions (L x W x H) |
+|---------|----------|-------------|------------------------|
+| `vehicle.lincoln.mkz` | Vehicle | Lincoln MKZ sedan | 4.93 x 2.11 x 1.48 m |
+| `vehicle.lincoln.mkz.perfect` | Vehicle | Lincoln MKZ (perfect heading control) | 4.93 x 2.11 x 1.48 m |
+| `vehicle.lincoln.mkz_lgsvl` | Vehicle | Lincoln MKZ LGSVL variant | 4.70 x 2.06 x 2.05 m |
+| `vehicle.lincoln.mkz_lgsvl.perfect` | Vehicle | Lincoln MKZ LGSVL (perfect heading) | 4.70 x 2.06 x 2.05 m |
+| `vehicle.bicycle.normal` | Vehicle | Bicycle | 3.00 x 1.00 x 1.80 m |
+| `vehicle.bicycle.normal.perfect` | Vehicle | Bicycle (perfect heading) | 3.00 x 1.00 x 1.80 m |
+| `walker.pedestrian.normal` | Walker | Pedestrian | 0.50 x 0.50 x 1.80 m |
+| `static.traffic_cone` | Static | Traffic cone (immovable) | 0.35 x 0.35 x 0.70 m |
+| `signal.traffic_light` | Signal | Traffic light (green/red/yellow) | N/A |
 
-| Type | Description |
-|------|-------------|
-| `vehicle.lincoln.mkz` | Lincoln MKZ sedan |
-| `vehicle.lincoln.mkz.perfect` | Lincoln MKZ (perfect tracking) |
-| `vehicle.lincoln.mkz_lgsvl` | Lincoln MKZ (LGSVL variant) |
-| `vehicle.lincoln.mkz_lgsvl.perfect` | Lincoln MKZ LGSVL (perfect tracking) |
-| `vehicle.bicycle.normal` | Bicycle |
-| `vehicle.bicycle.normal.perfect` | Bicycle (perfect tracking) |
-| `walker.pedestrian.normal` | Pedestrian |
-| `static.traffic_cone` | Traffic cone |
-| `signal.traffic_light` | Traffic light |
+> **Normal vs Perfect**: Normal actors use kinematic steering constraints (wheelbase, steer ratio). Perfect actors directly set heading to the target value each tick -- useful for ground-truth ADS vehicles.
 
-## Snapshot Structure
+## Network Ports
 
-The `sim.get_snapshot()` return value:
+| Port (default) | Protocol | Purpose | CLI flag |
+|----------------|----------|---------|----------|
+| 10667 | TCP (ZMQ msgpack-rpc) | RPC server | `--rpc-port` |
+| 18888 | HTTP + WebSocket | Visualization frontend | `--vis-port` |
 
-```python
-{
-    "time": {
-        "frame": 1234,
-        "game_time": 12.34,
-        "real_time_elapsed": 15.2,
-        "real_fps": 98.5,
-        "target_fps": 100.0,
-        "server_time": 1711900000.0
-    },
-    "scenario_running": True,
-    "actors": {
-        "ego_1": {
-            "location": {"x": ..., "y": ..., "z": ..., "yaw": ..., ...},
-            "speed": 5.2,
-            "polygon": [[x,y], [x,y], ...],
-            ...
-        },
-        ...
-    },
-    "signals": {
-        "tl_001": { ... },
-        ...
-    }
-}
-```
+## Available Maps
 
-## Adding Custom @sandbox_api Methods
-
-To expose a new RPC endpoint, use the `@sandbox_api` decorator on any method
-within `TrafficSandbox`, `Simulator`, `MapManager`, or their sub-objects:
-
-```python
-from common.rpc_utils import sandbox_api
-
-class MyManager:
-    @sandbox_api("my_custom_query")
-    def my_custom_query(self, param: str) -> dict:
-        return {"result": param}
-```
-
-The method will be auto-registered during startup via `register_module_api()`.
-The RPC name is determined by the object's position in the hierarchy
-(e.g., `map.lane.my_custom_query`).
+| Map | Directory |
+|-----|-----------|
+| `borregas_ave` | Borregas Avenue |
+| `san_mateo` | San Mateo |
+| `SanFrancisco` | San Francisco |
+| `sunnyvale` | Sunnyvale |
+| `sunnyvale_loop` | Sunnyvale Loop |
 
 ## Directory Structure
 
 ```
 TrafficSandbox/
-├── app.py                  # Server entry point + TrafficSandbox class
-├── simulator.py            # Simulation tick loop + actor management
+├── app.py                  # Entry point: Flask + RPC server + SocketIO
+├── simulator.py            # Simulation tick loop & actor management
 ├── config.py               # Global config (ports, FPS, logging)
-├── Dockerfile              # Container image definition
+├── Dockerfile
+├── actor/
+│   ├── vehicle/            # Vehicle actors (Lincoln MKZ, Bicycle)
+│   ├── walker/             # Pedestrian actors
+│   ├── static/             # Static objects (traffic cone)
+│   ├── signal/             # Traffic signals (traffic light)
+│   └── control/            # Control command dataclasses
 ├── common/
-│   ├── rpc_utils.py        # @sandbox_api decorator + RPC registration
-│   ├── data_structure.py   # Location, Waypoint, BoundingBox dataclasses
+│   ├── rpc_utils.py        # @sandbox_api decorator & RPC registration
+│   ├── data_structure.py   # Location, Waypoint, BoundingBox
 │   ├── timer.py            # Frame-based simulation timer
-│   └── utils.py            # Module discovery for actor registration
+│   └── utils.py            # Module discovery utilities
 ├── map_toolkit/
-│   ├── map_manager.py      # MapManager (waypoint + lane queries)
-│   ├── road_lane.py        # RoadLaneManager (lane geometry + topology)
-│   ├── waypoint.py         # Waypoint dataclass
+│   ├── map_manager.py      # MapManager (primary map query interface)
+│   ├── road_lane.py        # Lane geometry, topology & pathfinding
 │   ├── junction.py         # Junction management
 │   ├── crosswalk.py        # Crosswalk management
 │   ├── stop_sign.py        # Stop sign management
 │   ├── traffic_light.py    # Traffic light management
 │   └── data/               # Pre-built map pickle files
-├── actor/
-│   ├── vehicle/            # Vehicle actor implementations
-│   ├── walker/             # Pedestrian actor implementations
-│   ├── static/             # Static object implementations
-│   ├── signal/             # Traffic signal implementations
-│   └── control/            # Control command dataclasses
 ├── registry/               # Actor type registration system
-├── templates/              # Flask HTML templates (visualization)
-└── static/                 # Frontend CSS/JS (visualization)
+├── templates/              # Flask HTML templates
+├── static/                 # Frontend CSS/JS assets
+├── tests/                  # Test scripts
+└── docs/                   # Documentation
 ```
 
-## Network Ports
+## Documentation
 
-| Port | Protocol | Purpose |
-|------|----------|---------|
-| 10667 | TCP (ZMQ msgpack-rpc) | RPC server |
-| 8888 | HTTP + WebSocket | Visualization frontend |
+See the [docs/](docs/) directory for detailed documentation:
+
+- [Usage Guide](docs/usage_guide.md) -- How to use the sandbox end-to-end
+- [Architecture & Design](docs/architecture.md) -- System design and internals
+- [API Reference](docs/api_reference.md) -- Complete RPC API documentation

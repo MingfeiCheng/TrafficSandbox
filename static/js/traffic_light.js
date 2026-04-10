@@ -1,52 +1,76 @@
-import { getTransform } from "./view_state.js";
+import { applyMapTransform } from "./map.js";
 
-const trafficLightCanvas = document.getElementById("trafficLightCanvas");
-const trafficLightCtx = trafficLightCanvas.getContext("2d");
+const canvas = document.getElementById("trafficLightCanvas");
+const ctx = canvas.getContext("2d");
 
-trafficLightCanvas.width = window.innerWidth;
-trafficLightCanvas.height = window.innerHeight;
+// Map-based traffic light stop lines (loaded once with map data)
+let mapTrafficLights = null;
+// Active signal states from sim (updated via traffic_update)
+let activeSignals = null;
 
-let trafficLights = null;
+const TL_COLORS = {
+  "green":    "#22c55e",
+  "red":      "#ef4444",
+  "yellow":   "#eab308",
+  "inactive": "#555566",
+  "unknown":  "#6b7280",
+};
 
-const TRAFFIC_LIGHT_TYPE = {
-    "green": { color: "rgb(0,175,9)" },
-    "red": { color: "rgb(194,0,0)" },
-    "yellow": { color: "rgb(255,195,10)" },
-    "unknown": { color: "rgb(101,101,101)" }
+// Called when map data is loaded (init_map)
+export function setMapTrafficLights(tls) {
+  mapTrafficLights = tls;
 }
 
-export function updateTrafficLights(newTrafficLights) {
-    trafficLights = newTrafficLights;
-    drawTrafficLight();
+// Called on each traffic_update
+export function setTrafficLightData(tls) {
+  activeSignals = {};
+  if (tls) {
+    for (const tl of tls) {
+      activeSignals[tl.id] = tl.state || "unknown";
+    }
+  }
+}
+
+export function updateTrafficLights(tls) {
+  setTrafficLightData(tls);
+  drawTrafficLight();
 }
 
 export function drawTrafficLight() {
-    if (!trafficLights) return;
-    
-    const { offsetX, offsetY, scale, rotationAngle } = getTransform();
-    trafficLightCtx.clearRect(0, 0, trafficLightCanvas.width, trafficLightCanvas.height);
-    trafficLightCtx.save();
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+  }
 
-    trafficLightCtx.translate(offsetX, offsetY);
-    trafficLightCtx.scale(scale, scale);
-    trafficLightCtx.rotate(rotationAngle);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    trafficLights.forEach(light => {
-        const stop_line = light.stop_line;
-        const state = light.state;
+  if (!mapTrafficLights || mapTrafficLights.length === 0) return;
 
-        trafficLightCtx.strokeStyle = TRAFFIC_LIGHT_TYPE[state].color;
-        trafficLightCtx.lineWidth = 0.4;
+  ctx.save();
+  applyMapTransform(ctx, w, h);
+  ctx.lineCap = "round";
 
-        trafficLightCtx.beginPath();
-        stop_line.forEach(([x, y], i) => {
-            const normalizedX = x - min_x;
-            const normalizedY = y - min_y;
-            if (i === 0) trafficLightCtx.moveTo(normalizedX, normalizedY);
-            else trafficLightCtx.lineTo(normalizedX, normalizedY);
-        });
-        trafficLightCtx.stroke();
-    });
+  for (const tl of mapTrafficLights) {
+    const stopLine = tl.stop_line;
+    if (!stopLine || stopLine.length < 2) continue;
 
-    trafficLightCtx.restore();
+    // Use active signal state if available, otherwise "inactive"
+    const state = (activeSignals && activeSignals[tl.id]) || "inactive";
+    const color = TL_COLORS[state] || TL_COLORS.inactive;
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 0.35;
+    ctx.beginPath();
+    ctx.moveTo(stopLine[0][0], stopLine[0][1]);
+    for (let i = 1; i < stopLine.length; i++) {
+      ctx.lineTo(stopLine[i][0], stopLine[i][1]);
+    }
+    ctx.stroke();
+  }
+
+  ctx.restore();
 }

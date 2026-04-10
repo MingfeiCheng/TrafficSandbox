@@ -160,6 +160,13 @@ class TrafficSandbox:
     # Internals
     # ------------------------------------------------------------------
 
+    # High-frequency RPC methods that should only log at DEBUG level
+    _QUIET_METHODS = frozenset({
+        "sim.get_snapshot", "sim.get_time", "sim.get_actor", "sim.get_signal",
+        "sim.apply_vehicle_control", "sim.apply_walker_action",
+        "sim.get_scenario_status",
+    })
+
     def _patch_dispatcher_debug(self):
         """Wrap the dispatcher to log RPC calls and set RPC context."""
         orig_dispatch = self.dispatcher.dispatch
@@ -167,7 +174,11 @@ class TrafficSandbox:
         def debug_dispatch(self_disp, request, caller=None):
             try:
                 _RPC_CONTEXT.active = True
-                logger.info(f"[RPC] {request.method} args={getattr(request, 'args', None)}")
+                method = request.method
+                if method in TrafficSandbox._QUIET_METHODS:
+                    logger.debug(f"[RPC] {method}")
+                else:
+                    logger.info(f"[RPC] {method} args={getattr(request, 'args', None)}")
                 return orig_dispatch(request, caller)
             except Exception as e:
                 logger.exception(f"[RPC] Exception in {request.method}: {e}")
@@ -189,13 +200,29 @@ class TrafficSandbox:
         while not self.shutdown_requested:
             try:
                 snapshot = self.sim.get_snapshot()
+                time_info = snapshot.get("time", {})
+
+                # Convert actors dict -> list for frontend
+                actors_dict = snapshot.get("actors", {})
+                actors_list = list(actors_dict.values()) if isinstance(actors_dict, dict) else actors_dict
+
+                # Send only active signal states (stop_line geometry is in map data)
+                signals_dict = snapshot.get("signals", {})
+                traffic_lights_list = []
+                if isinstance(signals_dict, dict):
+                    for sig in signals_dict.values():
+                        traffic_lights_list.append({
+                            "id": sig.get("id", ""),
+                            "state": sig.get("state", "unknown"),
+                        })
+
                 traffic_data = {
                     "map_name": self.map.get_current_map(),
-                    "frame": snapshot.get("frame", 0),
-                    "game_time": snapshot.get("game_time", 0.0),
+                    "frame": time_info.get("frame", 0),
+                    "game_time": time_info.get("game_time", 0.0),
                     "real_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "actors": snapshot.get("actors", []),
-                    "traffic_lights": snapshot.get("traffic_lights", []),
+                    "actors": actors_list,
+                    "traffic_lights": traffic_lights_list,
                 }
                 self.socketio.start_background_task(self._emit_traffic, traffic_data)
                 time.sleep(0.05)
@@ -260,23 +287,30 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="TrafficSandbox RPC server")
     parser.add_argument("--fps", type=float, default=100.0)
+    parser.add_argument("--rpc-port", type=int, default=10667)
+    parser.add_argument("--vis-port", type=int, default=18888)
+    parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+                        help="Log level (default: INFO, use DEBUG to see high-frequency RPC calls)")
     args = parser.parse_args()
 
     log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
     os.makedirs(log_dir, exist_ok=True)
 
     Config.log_dir = log_dir
-    Config.debug = True
+    Config.debug = args.log_level == "DEBUG"
     Config.fps = args.fps
+    Config.RPC_PORT = args.rpc_port
+    Config.VIS_PORT = args.vis_port
 
-    level = "DEBUG"
+    level = args.log_level
     logger.configure(handlers=[{"sink": sys.stderr, "level": level}])
     logger.add(
         os.path.join(log_dir, "run.log"),
         level=level,
         mode="a",
-        rotation="10 MB",
-        retention=0,
+        rotation="5 MB",
+        retention=3,
+        compression="gz",
     )
 
     sandbox = TrafficSandbox(fps=Config.fps)
